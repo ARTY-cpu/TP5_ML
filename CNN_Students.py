@@ -18,12 +18,16 @@ DATASET       = 2
 learningRate  = 0.01
 maxIterations = 5
 
-nHidden1      = #??#       #Number of neurones in hidden layer 1
-nHidden2      = #??#       #Number of neurones in hidden layer 2
-ConvKernel    = #??#       #Size of filters in convolution layer
-Poolkernel    = #??#       #Size of filters in pooling layer
+nHidden1      = 120       #Number of neurones in hidden layer 1
+nHidden2      = 84        #Number of neurones in hidden layer 2
+ConvKernel    = 5         #Size of filters in convolution layer
+Poolkernel    = 2         #Size of filters in pooling layer
 
 #---------- Helpers Functions  -------------#
+
+def accuracy(y_true, y_pred):
+    '''Calculate accuracy between true labels and predicted labels'''
+    return np.mean(y_true == y_pred)
 
 def normalize(X, axis=-1, order=2):
     ''' Normalize the dataset X
@@ -53,6 +57,7 @@ def to_categorical(x, n_col=None):
 def plot_image(images, labels, predictions):
     '''Displays a random image in 'test' dataset its label, and predicted value '''
     # Détermination de la taille de l'image basée sur la longueur du vecteur d'image
+    import os
 
     index = np.random.randint(0, len(images))
 
@@ -62,17 +67,26 @@ def plot_image(images, labels, predictions):
         img_shape = (8, 8) if DATASET == 1 else (28, 28)
         cmap = 'gray'
         image = images[index].reshape(img_shape)  # Reshape grayscale images
-        title = f'CNN {name}: Label: {labels[index]}, Predicted: {predictions[index]}'
-        file_name = f"./{name}/CNN_{name}_{labels[index]}_{index}.pdf"
+        # Convert one-hot encoded labels to class indices
+        label_idx = np.argmax(labels[index]) if len(labels[index].shape) > 0 else labels[index]
+        pred_idx = predictions[index]
+        title = f'CNN {name}: Label: {label_idx}, Predicted: {pred_idx}'
+        # Create directory if it doesn't exist
+        os.makedirs(f"./{name}", exist_ok=True)
+        file_name = f"./{name}/CNN_{name}_{label_idx}_{index}.pdf"
     elif DATASET == 3:
         name = "CIFAR10"
         # No Reshape, already in  (10000, 3, 32, 32)
         cmap = None  # No color map needed for RGB
         image = images[index]  # Ensure image is correctly shaped
         classes = ["airplane","automobile","bird","cat","deer","dog","frog","horse","ship","truck"]
-        # Assuming labels and predictions are already decoded to category names:
-        title = f'CNN {name}: Label: {classes[labels[index]]}, Predicted: {classes[predictions[index]]}'
-        file_name = f"./{name}/CNN_{name}_{classes[labels[index]]}_{index}.pdf"
+        # Convert labels to class indices
+        label_idx = np.argmax(labels[index]) if len(labels[index].shape) > 0 else labels[index]
+        pred_idx = predictions[index]
+        title = f'CNN {name}: Label: {classes[label_idx]}, Predicted: {classes[pred_idx]}'
+        # Create directory if it doesn't exist
+        os.makedirs(f"./{name}", exist_ok=True)
+        file_name = f"./{name}/CNN_{name}_{classes[label_idx]}_{index}.pdf"
 
     # Plot the image
     plt.figure(figsize = (5,5))
@@ -91,6 +105,31 @@ def plot_history(history, model):
     Displays 'Cross Entropy loss' for Training and Testing set, for each iteration. In the same figure.
     Displays 'Accuracy' for Training and Testing set, for each iteration. In a second figure.
     """
+    # Plot Loss
+    plt.figure(figsize=(12, 5))
+    
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['loss'], label='Training Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title(f'{model} - Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    # Plot Accuracy
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['accuracy'], label='Training Accuracy')
+    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.title(f'{model} - Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig(f'./{model}_history.pdf')
+    plt.show()
 
 
 # --------- Cross Entropy Error Class  -------------#
@@ -187,19 +226,58 @@ def Keras_CNN_LeNet5(cnn, X_train, y_train, X_test, y_test, opt="SGD"):
         shapeIn = (28,28,1)
 
 
-    # 1- Creating CNN1 Model : Architecture with one VGG Block
+    # 1- Creating CNN1 Model : Architecture with VGG Block
+    # VGG Block = Multiple Conv layers + MaxPooling
+    model = Sequential([
+        Input(shape=shapeIn),
+        # Premier VGG Block : 2 Conv + MaxPooling
+        Conv2D(32, kernel_size=cnn.Ckernel, activation=h_activation, padding='same'),
+        Conv2D(32, kernel_size=cnn.Ckernel, activation=h_activation, padding='same'),
+        MaxPooling2D(pool_size=cnn.Pkernel),
+        # Deuxième VGG Block : 2 Conv + MaxPooling
+        Conv2D(64, kernel_size=cnn.Ckernel, activation=h_activation, padding='same'),
+        Conv2D(64, kernel_size=cnn.Ckernel, activation=h_activation, padding='same'),
+        MaxPooling2D(pool_size=cnn.Pkernel),
+        # Flatten pour passer aux couches denses
+        Flatten(),
+        # Couches fully connected
+        Dense(cnn.n_hidden1, activation=h_activation),
+        Dense(cnn.n_hidden2, activation=h_activation),
+        Dense(10, activation=out_activation)
+    ])
 
     # 2- Fixing Optimizer algorithm and error function
     #SGD  - Stochastic Gradient Descent 
     #Adam - adapts itself the learning Rate !
+    if opt == "SGD":
+        optimizer = tf.keras.optimizers.SGD(learning_rate=cnn.learning_rate)
+    else:
+        optimizer = tf.keras.optimizers.Adam(learning_rate=cnn.learning_rate)
+    
+    model.compile(optimizer=optimizer,
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+    
+    # Afficher l'architecture du modèle
+    model.summary()
 
     # 3- Training model
-
+    history = model.fit(X_train, y_train,
+                       batch_size=128,
+                       epochs=cnn.n_iterations,
+                       validation_data=(X_test, y_test),
+                       verbose=1)
 
     # 4- Testing model
-
+    test_loss, test_accuracy = model.evaluate(X_test, y_test, verbose=0)
+    print(f"\nTest Accuracy: {test_accuracy:.4f}")
+    print(f"Test Loss: {test_loss:.4f}")
     
     # 5- Get predictions
+    predictions = model.predict(X_test)
+    predicted_classes = np.argmax(predictions, axis=1)
+    y_test_classes = np.argmax(y_test, axis=1)
+    accuracy = test_accuracy
 
 
     # 6- Call plot_image function
@@ -207,7 +285,7 @@ def Keras_CNN_LeNet5(cnn, X_train, y_train, X_test, y_test, opt="SGD"):
         plot_image(X_test, y_test, predicted_classes)
 
     # 7- Call plot_history to show loss and accuracy
-    plot_history(history, "CNN_LeNet5")
+    plot_history(history, "CNN_VGG")
 
     return accuracy
 
@@ -259,8 +337,24 @@ if __name__ == "__main__":
 
 
     ##################### 2- Creating Model #################
-
+    cnn = ConvolutionNeuralNetwork()
+    print(f"\nCNN Parameters:")
+    print(f"Hidden Layer 1: {cnn.n_hidden1} neurons")
+    print(f"Hidden Layer 2: {cnn.n_hidden2} neurons")
+    print(f"Iterations: {cnn.n_iterations}")
+    print(f"Learning Rate: {cnn.learning_rate}")
+    print(f"Convolution Kernel: {cnn.Ckernel}")
+    print(f"Pooling Kernel: {cnn.Pkernel}")
 
     #################### 3- CNN with TensorFlow ##############
+    print("\n========== CNN VGG with SGD ==========")
+    acc_sgd = Keras_CNN_LeNet5(cnn, X_train, y_train, X_test, y_test, opt="SGD")
+    
+    print("\n========== CNN VGG with Adam ==========")
+    acc_adam = Keras_CNN_LeNet5(cnn, X_train, y_train, X_test, y_test, opt="Adam")
+    
+    print(f"\n\nFinal Results:")
+    print(f"SGD Accuracy:  {acc_sgd:.4f}")
+    print(f"Adam Accuracy: {acc_adam:.4f}")
 
 
